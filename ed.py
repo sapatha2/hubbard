@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 from sklearn import preprocessing
-
+import statsmodels.api as sm
 
 def hamiltonian(U):
   '''
@@ -49,11 +49,10 @@ def build_dm(e,ci,norb,nelec):
   dt = []
   dU = []
   dJ = []
-  for i in range(len(ci)):
-    dm = cis.make_rdm12s(ci[i],norb,nelec)
+  for p in range(len(ci)):
+    dm = cis.make_rdm12s(ci[p],norb,nelec)
     dm1 = np.array(dm[0])
     dm2 = np.array(dm[1])
-
     dm1 = dm1[0]+dm1[1]
 
     val1 = 0
@@ -72,15 +71,12 @@ def build_dm(e,ci,norb,nelec):
     for i in range(norb):
       j = np.mod(i+1,norb)
       val3 += 2.*(0.25*dm2[0][i,i,j,j] + 
-                  0.25*dm2[0][j,j,i,i] +
-                  0.25*dm2[2][i,i,j,j] + 
-                  0.25*dm2[2][j,j,i,i] - 
+                  0.25*dm2[2][i,i,j,j] - 
                   0.25*dm2[1][i,i,j,j] - 
                   0.25*dm2[1][j,j,i,i] - 
                   0.50*dm2[1][j,i,i,j] - 
                   0.50*dm2[1][i,j,j,i])
     dJ.append(val3)
-
   return pd.DataFrame({'energy':e,'dt':dt,'dU':dU,'dJ':dJ})
 
 def sub_sampling(e,ci,subset,N,norb,nelec,method='unif'):
@@ -120,9 +116,10 @@ def unif(e,ci,subset,N,norb,nelec):
   
   return build_dm(sampled_e,sampled_ci,norb,nelec)
 
+'''
 #FCI solver
 Sz=0
-U=8
+U=1000
 norb = 4
 nelec = (2 + Sz, 2 - Sz)
 h1,eri = hamiltonian(U)
@@ -131,14 +128,65 @@ e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
 #Plot dt, dU, energy for eigenstates/samples
 method = 'unif'
 prop = build_dm(e,ci,norb=norb,nelec=nelec)
-sns.pairplot(prop)
-plt.show()
-#samples = sub_sampling(e,ci,np.arange(6),1000,norb=norb,nelec=nelec,method=method)
+#sns.pairplot(prop)
+#plt.show()
 
-'''
+samples = sub_sampling(e,ci,np.arange(6),1000,norb=norb,nelec=nelec,method=method)
 prop['type']='ED'
 samples['type']=method
 df = pd.concat((samples,prop.iloc[:6]),axis=0)
-sns.pairplot(df,hue='type',markers=['.','o'])
-plt.show()
+#sns.pairplot(df,hue='type',markers=['.','o'])
+#plt.show()
+
+X=df['dJ']
+y=df['energy']
+X=sm.add_constant(X)
+ols=sm.OLS(y,X).fit()
 '''
+
+#FCI solver
+Sz=0
+norb = 4
+nelec = (2 + Sz, 2 - Sz)
+
+J = []
+R2 = []
+#Us = list(np.linspace(0,8,30))+list(np.linspace(10,20,6))
+Us = list(np.linspace(0,20,11))
+for U in Us:
+  h1,eri = hamiltonian(U)
+  e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
+ 
+  y = e
+  x = np.ones(len(e))*U
+  plt.plot(x,y,'bo')
+  plt.plot(x[:6],y[:6],'g*')
+
+  '''
+  #Plot dt, dU, energy for eigenstates/samples
+  method = 'unif'
+  prop = build_dm(e,ci,norb=norb,nelec=nelec)
+  #sns.pairplot(prop)
+  #plt.show()
+
+  samples = sub_sampling(e,ci,np.arange(6),1000,norb=norb,nelec=nelec,method=method)
+  prop['type']='ED'
+  samples['type']=method
+  df = pd.concat((samples,prop.iloc[:6]),axis=0)
+  #sns.pairplot(df,hue='type',markers=['.','o'])
+  #plt.show()
+
+  X=df['dJ']
+  y=df['energy']
+  X=sm.add_constant(X)
+  ols=sm.OLS(y,X).fit()
+  J.append(ols.params[1]*(U/4)) #J/(4*t^2/U)
+  R2.append(ols.rsquared)
+
+plt.plot(Us,J,'-o',label='J')
+plt.xlabel('U')
+plt.plot(Us,R2,'-o',label='R2')
+plt.legend(loc='best')
+plt.savefig('undoped_regr.pdf')
+  '''
+plt.savefig('undoped_eig.pdf')
