@@ -119,7 +119,7 @@ def unif(e,ci,subset,N,norb,nelec):
 '''
 #FCI solver
 Sz=0
-U=1000
+U=2
 norb = 4
 nelec = (2 + Sz, 2 - Sz)
 h1,eri = hamiltonian(U)
@@ -134,14 +134,15 @@ prop = build_dm(e,ci,norb=norb,nelec=nelec)
 samples = sub_sampling(e,ci,np.arange(6),1000,norb=norb,nelec=nelec,method=method)
 prop['type']='ED'
 samples['type']=method
-df = pd.concat((samples,prop.iloc[:6]),axis=0)
-#sns.pairplot(df,hue='type',markers=['.','o'])
-#plt.show()
+df = pd.concat((samples,prop),axis=0)
+sns.pairplot(df,hue='type',markers=['.','o'])
+plt.show()
 
 X=df['dJ']
 y=df['energy']
 X=sm.add_constant(X)
 ols=sm.OLS(y,X).fit()
+exit(0)
 '''
 
 #FCI solver
@@ -151,18 +152,19 @@ nelec = (2 + Sz, 2 - Sz)
 
 J = []
 R2 = []
-#Us = list(np.linspace(0,8,30))+list(np.linspace(10,20,6))
-Us = list(np.linspace(0,20,11))
+Us = list(np.linspace(0,8,30))+list(np.linspace(10,20,6))
+#Us = list(np.linspace(0,20,11))
 for U in Us:
   h1,eri = hamiltonian(U)
   e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
  
+  '''
   y = e
   x = np.ones(len(e))*U
   plt.plot(x,y,'bo')
   plt.plot(x[:6],y[:6],'g*')
-
   '''
+
   #Plot dt, dU, energy for eigenstates/samples
   method = 'unif'
   prop = build_dm(e,ci,norb=norb,nelec=nelec)
@@ -183,10 +185,9 @@ for U in Us:
   J.append(ols.params[1]*(U/4)) #J/(4*t^2/U)
   R2.append(ols.rsquared)
 
-plt.plot(Us,J,'-o',label='J')
+plt.plot(Us,J,'-o',label='J/(4t^2/U)')
 plt.xlabel('U')
 plt.plot(Us,R2,'-o',label='R2')
 plt.legend(loc='best')
 plt.savefig('undoped_regr.pdf')
-  '''
-plt.savefig('undoped_eig.pdf')
+#plt.savefig('undoped_eig.pdf')
