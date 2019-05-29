@@ -12,7 +12,7 @@ import pandas as pd
 import seaborn as sns
 from sklearn import preprocessing
 import statsmodels.api as sm
-
+from sklearn.metrics import r2_score
 def hamiltonian(U):
   '''
   input:
@@ -81,7 +81,7 @@ def build_dm(e,ci,norb,nelec):
     dJ.append(val3)
   return pd.DataFrame({'energy':e,'dt':dt,'dU':dU,'dJ':dJ})
 
-def sub_sampling(e,ci,subset,N,norb,nelec,method='unif'):
+def sub_sampling(e,ci,subset,N,norb,nelec,method='unif',beta=None,dt=None):
   #Generate samples 
   '''
   input:
@@ -94,6 +94,8 @@ def sub_sampling(e,ci,subset,N,norb,nelec,method='unif'):
 
   if(method=='unif'):
     return unif(e,ci,subset,N,norb,nelec)
+  elif(method=='boltz'):
+    return boltz(e,ci,subset,N,norb,nelec,beta,dt)
   else:
     return -1
 
@@ -118,81 +120,100 @@ def unif(e,ci,subset,N,norb,nelec):
   
   return build_dm(sampled_e,sampled_ci,norb,nelec)
 
-#FCI solver
-'''
+def boltz(e,ci,subset,N,norb,nelec,beta,dt):
+  '''
+  input:
+    e - list of energies from ED
+    ci - list of CI coefficients from ED
+    subset - list of CIs to sample the span of 
+    N - number of samples to draw
+    beta - temperature for boltzmann sample
+    dt - timestep, adjusted so acceptance is 50%
+  '''
+  
+  print("Boltzmann sampling: "+str(N))
+  basis = np.array(ci)[subset]
+  e_basis = np.array(e)[subset]
+  coeffs = []
+  curr = np.zeros(subset.shape[0])
+  curr[0] = 1
+  e_curr = np.dot(curr**2,e_basis)/np.dot(curr,curr)
+  coeffs.append(curr)
+
+  acc_ratio = 0
+  for i in range(N): 
+    print(e_curr)
+    prop = curr + dt*np.random.normal(size=(subset.shape[0])) #MC move 
+    e_prop = np.dot(prop**2,e_basis)/np.dot(prop,prop)
+    acc = (np.exp(-beta*(e_prop - e_curr)) > np.random.uniform(size=1))
+    if(acc): 
+      coeffs.append(prop)
+      curr = prop
+      e_curr = np.dot(curr**2,e_basis)/np.dot(curr,curr)
+      acc_ratio += 1
+    else: 
+      coeffs.append(curr)
+
+  coeffs = preprocessing.normalize(coeffs, norm='l2')
+  sampled_ci = np.einsum('ij,jkl->ikl',coeffs,basis)
+  sampled_e = np.dot(coeffs**2,e_basis)
+
+  print("Acceptance ratio: "+str(acc_ratio/N))
+  return build_dm(sampled_e,sampled_ci,norb,nelec)
+
+#t or J model only, WLS on eigenstates
 Sz=0
-U=20
-norb = 4
-nelec = (2 + Sz, 2 - Sz)
-h1,eri = hamiltonian(U)
-e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
-
-#Plot dt, dU, energy for eigenstates/samples
-method = 'unif'
-prop = build_dm(e,ci,norb=norb,nelec=nelec)
-print(prop)
-#sns.pairplot(prop)
-#plt.show()
-
-samples = sub_sampling(e,ci,np.arange(6),1000,norb=norb,nelec=nelec,method=method)
-prop['type']='ED'
-samples['type']=method
-df = pd.concat((samples,prop),axis=0)
-#sns.pairplot(df,hue='type',markers=['.','o'])
-#plt.show()
-#exit(0)
-
-X=df[['dU','dt']]
-y=df['energy']
-X=sm.add_constant(X)
-ols=sm.OLS(y,X).fit()
-print(ols.summary())
-
-X=samples['dJ']
-y=samples['energy']
-X=sm.add_constant(X)
-ols=sm.OLS(y,X).fit()
-print(ols.summary())
-exit(0)
-'''
-
-#FCI solver
-Sz=0
-norb = 4
-nelec = (2 + Sz, 2 - Sz)
-
-J = []
-R2 = []
-#Us = list(np.linspace(0,8,30))+list(np.linspace(10,20,6))
-Us = list(np.linspace(0,20,11))
-for U in Us:
+R2_J = np.zeros((20,10))
+R2_t = np.zeros((20,10))
+for U in np.arange(20):
+  norb = 4
+  nelec = (2 + Sz, 2 - Sz)
   h1,eri = hamiltonian(U)
   e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
- 
-  #Plot dt, dU, energy for eigenstates/samples
-  method = 'unif'
   prop = build_dm(e,ci,norb=norb,nelec=nelec)
-  #sns.pairplot(prop)
-  #plt.show()
 
-  samples = sub_sampling(e,ci,np.arange(6),1000,norb=norb,nelec=nelec,method=method)
-  prop['type']='ED'
-  samples['type']=method
-  df = pd.concat((samples,prop.iloc[:6]),axis=0)
-  #sns.pairplot(df,hue='type',markers=['.','o'])
-  #plt.show()
-
-  X=df['dJ']
-  y=df['energy']
+  #J, strong coupling limit
+  X=prop['dJ']
+  y=prop['energy']
   X=sm.add_constant(X)
-  ols=sm.OLS(y,X).fit()
-  J.append(ols.params[1]*(U/4)) #J/(4*t^2/U)
-  R2.append(ols.rsquared)
+  for beta in np.arange(10):
+    w = np.exp(-beta*(y-min(y)))
+    ols=sm.WLS(y,X,weights=w).fit()
+    R2_J[U,beta] = ols.rsquared
 
-plt.plot(Us,J,'-o',label='J/(4t^2/U)')
-plt.xlabel('U')
-plt.plot(Us,R2,'-o',label='R2')
-plt.legend(loc='best')
-plt.show()
-#plt.savefig('undoped_regr.pdf')
-#plt.savefig('undoped_eig.pdf')
+  #T, weak coupling limit
+  X=prop['dt']
+  y=prop['energy']
+  X=sm.add_constant(X)
+  for beta in np.arange(10):
+    w = np.exp(-beta*(y-min(y)))
+    ols=sm.WLS(y,X,weights=w).fit()
+    R2_t[U,beta] = ols.rsquared
+
+#Plot results
+fig, axes = plt.subplots(nrows=3,ncols=1,sharey=True,sharex=True,figsize=(3,9))
+ax = axes[0]
+ax.matshow(R2_J.T,vmax=1,vmin=-1,cmap=plt.cm.bwr)
+ax.set_xlabel('U')
+ax.set_ylabel('1/kT')
+ax.set_title('Model: J')
+
+ax = axes[1]
+ax.matshow(-1*R2_t.T,vmax=1,vmin=-1,cmap=plt.cm.bwr)
+ax.set_xlabel('U')
+ax.set_ylabel('1/kT')
+ax.set_title('Model: t')
+
+ax = axes[2]
+mat = np.maximum(R2_J,R2_t)
+ind = np.where(mat == R2_t)
+mat[ind]*=-1
+ax.matshow(mat.T,vmax=1,vmin=-1,cmap=plt.cm.bwr)
+ax.set_xlabel('U')
+ax.set_ylabel('1/kT')
+ax.set_title('Model: Best of t (b) or J (r)')
+ax.xaxis.tick_bottom()
+
+plt.suptitle('WLS on eigenstates')
+plt.savefig('eff_eig.pdf',bbox_inches='tight')
+exit(0)
