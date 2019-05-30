@@ -166,7 +166,6 @@ def boltz(e,ci,subset,N,norb,nelec,beta,dt):
 
 if __name__=='__main__':
   #eig_vs_U.pdf
-  '''
   Sz=0
   energies = []
   for U in np.arange(0,12.1,0.1):
@@ -177,42 +176,33 @@ if __name__=='__main__':
     energies.append(e-min(e))
   energies=np.array(energies).T
 
-  fig, ax = plt.subplots(nrows=1,ncols=2)
+  fig, ax = plt.subplots(nrows=1,ncols=2,sharey=True)
   Us = np.arange(0,12.1,0.1)
   for x in energies:
     ax[0].plot(Us,x,'k')
   ax[0].set_xlabel('U/t')
   
-  beta = np.arange(0,3.25,0.25)
-  temp_matrix = np.zeros((300,len(beta)))
+  beta = np.arange(0,5.0,0.5)
   for b in beta:
-    temp_matrix[:,int(b*4)] = np.exp(-np.linspace(30,0,300)*b)
-  ax[1].imshow(temp_matrix,vmin=0,vmax=1,cmap=plt.cm.pink)
+    x = np.ones(100)*b
+    y = np.exp(-np.linspace(0,30,100)*b)
+    ax[1].plot(x,y,'b')
   ax[1].set_xlabel('1/kT')
-  ax[0].set_ylabel('E - E_0')
-  ax[1].set_yticks(np.arange(0,350,50))
-  ax[1].set_yticklabels(np.arange(30,-5,-5))
-  
-  ax[1].set_xticks([0,4,8,12])
-  ax[1].set_xticklabels([0,1,2,3])
-  ax[1].set_aspect(0.1)
+
+  plt.ylabel('E - E_0')
   plt.show()
   exit(0)
-  '''
 
   #eff_eig.pdf
   Sz=0
-  betas = np.arange(0,3.25,0.25)
-  Us = np.arange(13)
-  R2_J = np.zeros((len(Us),len(betas)))
-  R2_U = np.zeros((len(Us),len(betas)))
-  R2_t = np.zeros((len(Us),len(betas)))
-  v_J = np.zeros((len(Us),len(betas)))
-  v_U = np.zeros((len(Us),len(betas)))
-  v_t = np.zeros((len(Us),len(betas)))
+  R2_J = np.zeros((10,10))
+  R2_t = np.zeros((10,10))
+  R2_U = np.zeros((10,10))
   
-  Uz = 0
-  for U in Us:
+  v_J = np.zeros((10,10))
+  v_t = np.zeros((10,10))
+  v_U = np.zeros((10,10))
+  for U in np.arange(10):
     norb = 4
     nelec = (2 + Sz, 2 - Sz)
     h1,eri = hamiltonian(U)
@@ -220,43 +210,45 @@ if __name__=='__main__':
     prop = build_dm(e,ci,norb=norb,nelec=nelec)
 
     #J, strong coupling limit
+    X=prop['dJ']
     y=prop['energy']
-    z=0
-    for beta in betas:
-      print(U,beta)
-      X=prop['dJ']
-      X=sm.add_constant(X)
+    X=sm.add_constant(X)
+    for beta in np.arange(0,5.0,0.5):
       w = np.exp(-beta*(y-min(y)))
       ols=sm.WLS(y,X,weights=w).fit()
-      R2_J[Uz,z] = ols.rsquared
-      v_J[Uz,z] = ols.params[1]
-   
-      X=prop['dt']
-      X=sm.add_constant(X)
+      R2_J[U,int(beta*2)] = ols.rsquared
+      v_J[U,int(beta*2)] = ols.params[1]
+      
+    #T, weak coupling limit
+    X=prop['dt']
+    y=prop['energy']
+    X=sm.add_constant(X)
+    for beta in np.arange(0,5.0,0.5):
       w = np.exp(-beta*(y-min(y)))
       ols=sm.WLS(y,X,weights=w).fit()
-      R2_t[Uz,z] = ols.rsquared
-      v_t[Uz,z] = ols.params[1]
+      R2_t[U,int(beta*2)] = ols.rsquared
+      v_t[U,int(beta*2)] = ols.params[1]
     
-      X=prop['dU']
-      X=sm.add_constant(X)
+    #U, also seems to work for low T, small coupling
+    X=prop['dU']
+    y=prop['energy']
+    X=sm.add_constant(X)
+    for beta in np.arange(0,5.0,0.5):
       w = np.exp(-beta*(y-min(y)))
       ols=sm.WLS(y,X,weights=w).fit()
-      R2_U[Uz,z] = ols.rsquared
-      v_U[Uz,z] = ols.params[1]
-      z+=1
-    Uz+=1
-  
+      R2_U[U,int(beta*2)] = ols.rsquared
+      v_U[U,int(beta*2)] = ols.params[1]
   #Plot results
   fig, axes = plt.subplots(nrows=4,ncols=2,sharey=True,sharex=True,figsize=(6,15))
   ax = axes[0,0]
-  ax.matshow(R2_J.T,vmax=1,vmin=0,cmap=plt.cm.Blues)
+  ax.matshow(R2_J.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
   ax.set_title('Model: J')
 
   ax = axes[0,1]
   v_J = np.ma.masked_where((R2_J < 0.4),v_J)
+  m = max(abs(np.min(v_J)),abs(np.max(v_J)))
   ax.matshow(v_J.T,vmin=-0.25,vmax=0.25,cmap=plt.cm.RdGy)
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
@@ -270,6 +262,7 @@ if __name__=='__main__':
 
   ax = axes[1,1]
   v_U = np.ma.masked_where((R2_U < 0.4),v_U)
+  minmax = max(abs(np.min(v_U)),abs(np.max(v_U)))
   ax.matshow(v_U.T,vmin=-10,vmax=10,cmap=plt.cm.RdGy)
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
@@ -283,11 +276,12 @@ if __name__=='__main__':
 
   ax = axes[2,1]
   v_t = np.ma.masked_where((R2_t < 0.4),v_t)
+  minmax = max(abs(np.min(v_t)),abs(np.max(v_t)))
   ax.matshow(-v_t.T,vmin=-1,vmax=1,cmap=plt.cm.RdGy)
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
   ax.set_title('Model: t (1, -1)')
-  
+
   ax = axes[3,0]
   plot_mat = np.ma.masked_where((R2_J < R2_t)|(R2_J < R2_U),R2_J)
   im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
@@ -300,11 +294,8 @@ if __name__=='__main__':
   ax.set_ylabel('1/kT')
   ax.set_title('Model: Best of J (b), U(g), t (r)')
   ax.xaxis.tick_bottom()
-  ax.set_yticks([0,4,8,12])
-  ax.set_yticklabels([0,1,2,3])
-  
-  ax = axes[3,1]
-  plt.cla()
+  ax.set_yticks(np.arange(R2_J.shape[0]))
+  ax.set_yticklabels(np.arange(0,5.0,0.5))
 
   plt.suptitle('WLS R2 and Param values on eigenstates')
   plt.savefig('eff_eig.pdf',bbox_inches='tight')
