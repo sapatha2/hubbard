@@ -13,6 +13,9 @@ import seaborn as sns
 from sklearn import preprocessing
 import statsmodels.api as sm
 from sklearn.metrics import r2_score
+import matplotlib.patches as patches
+from matplotlib.colors import LinearSegmentedColormap
+
 def hamiltonian(U):
   '''
   input:
@@ -161,59 +164,144 @@ def boltz(e,ci,subset,N,norb,nelec,beta,dt):
   print("Acceptance ratio: "+str(acc_ratio/N))
   return build_dm(sampled_e,sampled_ci,norb,nelec)
 
-#t or J model only, WLS on eigenstates
-Sz=0
-R2_J = np.zeros((20,10))
-R2_t = np.zeros((20,10))
-for U in np.arange(20):
-  norb = 4
-  nelec = (2 + Sz, 2 - Sz)
-  h1,eri = hamiltonian(U)
-  e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
-  prop = build_dm(e,ci,norb=norb,nelec=nelec)
+if __name__=='__main__':
+  #eig_vs_U.pdf
+  '''
+  Sz=0
+  energies = []
+  for U in np.arange(0,12.1,0.1):
+    norb = 4
+    nelec = (2 + Sz, 2 - Sz)
+    h1,eri = hamiltonian(U)
+    e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
+    e = e - min(e)
+    energies.append(e)
+  energies=np.array(energies).T
 
-  #J, strong coupling limit
-  X=prop['dJ']
-  y=prop['energy']
-  X=sm.add_constant(X)
-  for beta in np.arange(10):
-    w = np.exp(-beta*(y-min(y)))
-    ols=sm.WLS(y,X,weights=w).fit()
-    R2_J[U,beta] = ols.rsquared
+  fig,ax = plt.subplots(1)
+  Us = np.arange(0,12.1,0.1)
+  for x in energies:
+    ax.plot(Us,x,'k')
 
-  #T, weak coupling limit
-  X=prop['dt']
-  y=prop['energy']
-  X=sm.add_constant(X)
-  for beta in np.arange(10):
-    w = np.exp(-beta*(y-min(y)))
-    ols=sm.WLS(y,X,weights=w).fit()
-    R2_t[U,beta] = ols.rsquared
+  rect = patches.Rectangle((0,0),0.1,2.8,facecolor='r',alpha=0.5)
+  ax.add_patch(rect)
 
-#Plot results
-fig, axes = plt.subplots(nrows=3,ncols=1,sharey=True,sharex=True,figsize=(3,9))
-ax = axes[0]
-ax.matshow(R2_J.T,vmax=1,vmin=-1,cmap=plt.cm.bwr)
-ax.set_xlabel('U')
-ax.set_ylabel('1/kT')
-ax.set_title('Model: J')
+  rect = patches.Rectangle((0.1,0),6,2.8,facecolor='g',alpha=0.5)
+  ax.add_patch(rect)
 
-ax = axes[1]
-ax.matshow(-1*R2_t.T,vmax=1,vmin=-1,cmap=plt.cm.bwr)
-ax.set_xlabel('U')
-ax.set_ylabel('1/kT')
-ax.set_title('Model: t')
+  rect = patches.Rectangle((6,0),6,4.3,facecolor='b',alpha=0.5)
+  ax.add_patch(rect)
 
-ax = axes[2]
-mat = np.maximum(R2_J,R2_t)
-ind = np.where(mat == R2_t)
-mat[ind]*=-1
-ax.matshow(mat.T,vmax=1,vmin=-1,cmap=plt.cm.bwr)
-ax.set_xlabel('U')
-ax.set_ylabel('1/kT')
-ax.set_title('Model: Best of t (b) or J (r)')
-ax.xaxis.tick_bottom()
+  plt.xlabel('U/t')
+  plt.ylabel('Eigenvalue')
+  plt.show()
+  exit(0)
+  '''
 
-plt.suptitle('WLS on eigenstates')
-plt.savefig('eff_eig.pdf',bbox_inches='tight')
-exit(0)
+  #eff_eig.pdf
+  Sz=0
+  R2_J = np.zeros((10,10))
+  R2_t = np.zeros((10,10))
+  R2_U = np.zeros((10,10))
+  
+  v_J = np.zeros((10,10))
+  v_t = np.zeros((10,10))
+  v_U = np.zeros((10,10))
+  for U in np.arange(10):
+    norb = 4
+    nelec = (2 + Sz, 2 - Sz)
+    h1,eri = hamiltonian(U)
+    e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
+    prop = build_dm(e,ci,norb=norb,nelec=nelec)
+
+    #J, strong coupling limit
+    X=prop['dJ']
+    y=prop['energy']
+    X=sm.add_constant(X)
+    for beta in np.arange(0,5.0,0.5):
+      w = np.exp(-beta*(y-min(y)))
+      ols=sm.WLS(y,X,weights=w).fit()
+      R2_J[U,int(beta*2)] = ols.rsquared
+      v_J[U,int(beta*2)] = ols.params[1]
+      
+    #T, weak coupling limit
+    X=prop['dt']
+    y=prop['energy']
+    X=sm.add_constant(X)
+    for beta in np.arange(0,5.0,0.5):
+      w = np.exp(-beta*(y-min(y)))
+      ols=sm.WLS(y,X,weights=w).fit()
+      R2_t[U,int(beta*2)] = ols.rsquared
+      v_t[U,int(beta*2)] = ols.params[1]
+    
+    #U, also seems to work for low T, small coupling
+    X=prop['dU']
+    y=prop['energy']
+    X=sm.add_constant(X)
+    for beta in np.arange(0,5.0,0.5):
+      w = np.exp(-beta*(y-min(y)))
+      ols=sm.WLS(y,X,weights=w).fit()
+      R2_U[U,int(beta*2)] = ols.rsquared
+      v_U[U,int(beta*2)] = ols.params[1]
+  #Plot results
+  fig, axes = plt.subplots(nrows=4,ncols=2,sharey=True,sharex=True,figsize=(6,15))
+  ax = axes[0,0]
+  ax.matshow(R2_J.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: J')
+
+  ax = axes[0,1]
+  v_J = np.ma.masked_where((R2_J < 0.4),v_J)
+  m = max(abs(np.min(v_J)),abs(np.max(v_J)))
+  ax.matshow(v_J.T,vmin=-0.25,vmax=0.25,cmap=plt.cm.RdGy)
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: J (-0.25,0.25)')
+
+  ax = axes[1,0]
+  ax.matshow(R2_U.T,vmax=1,vmin=0,cmap=plt.cm.Greens)
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: U')
+
+  ax = axes[1,1]
+  v_U = np.ma.masked_where((R2_U < 0.4),v_U)
+  minmax = max(abs(np.min(v_U)),abs(np.max(v_U)))
+  ax.matshow(v_U.T,vmin=-10,vmax=10,cmap=plt.cm.RdGy)
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: U (-10, 10)')
+
+  ax = axes[2,0]
+  ax.matshow(R2_t.T,vmax=1,vmin=0,cmap=plt.cm.Reds)
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: t')
+
+  ax = axes[2,1]
+  v_t = np.ma.masked_where((R2_t < 0.4),v_t)
+  minmax = max(abs(np.min(v_t)),abs(np.max(v_t)))
+  ax.matshow(-v_t.T,vmin=-1,vmax=1,cmap=plt.cm.RdGy)
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: t (1, -1)')
+
+  ax = axes[3,0]
+  plot_mat = np.ma.masked_where((R2_J < R2_t)|(R2_J < R2_U),R2_J)
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
+  plot_mat = np.ma.masked_where((R2_U < R2_t)|(R2_U < R2_J),R2_U)
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Greens)
+  plot_mat = np.ma.masked_where((R2_t < R2_U)|(R2_t < R2_J),R2_t)
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Reds)
+
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: Best of J (b), U(g), t (r)')
+  ax.xaxis.tick_bottom()
+  ax.set_yticks(np.arange(R2_J.shape[0]))
+  ax.set_yticklabels(np.arange(0,5.0,0.5))
+
+  plt.suptitle('WLS R2 and Param values on eigenstates')
+  plt.savefig('eff_eig.pdf',bbox_inches='tight')
+  exit(0)
