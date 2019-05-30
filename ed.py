@@ -250,7 +250,7 @@ if __name__=='__main__':
   #Plot results
   fig, axes = plt.subplots(nrows=4,ncols=2,sharey=True,sharex=True,figsize=(6,15))
   ax = axes[0,0]
-  ax.matshow(R2_J.T,vmax=1,vmin=0,cmap=plt.cm.Blues)
+  ax.matshow(R2_J.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
   ax.set_title('Model: J')
@@ -263,7 +263,7 @@ if __name__=='__main__':
   ax.set_title('Model: J (-0.25,0.25)')
 
   ax = axes[1,0]
-  ax.matshow(R2_U.T,vmax=1,vmin=0,cmap=plt.cm.Greens)
+  ax.matshow(R2_U.T,vmax=1,vmin=0.5,cmap=plt.cm.Greens)
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
   ax.set_title('Model: U')
@@ -276,7 +276,7 @@ if __name__=='__main__':
   ax.set_title('Model: U (-10, 10)')
 
   ax = axes[2,0]
-  ax.matshow(R2_t.T,vmax=1,vmin=0,cmap=plt.cm.Reds)
+  ax.matshow(R2_t.T,vmax=1,vmin=0.5,cmap=plt.cm.Reds)
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
   ax.set_title('Model: t')
@@ -303,9 +303,6 @@ if __name__=='__main__':
   ax.set_yticks([0,4,8,12])
   ax.set_yticklabels([0,1,2,3])
   
-  ax = axes[3,1]
-  plt.cla()
-
   plt.suptitle('WLS R2 and Param values on eigenstates')
   plt.savefig('eff_eig.pdf',bbox_inches='tight')
   exit(0)
