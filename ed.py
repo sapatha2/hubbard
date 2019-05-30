@@ -295,10 +295,26 @@ if __name__=='__main__':
   im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Greens)
   plot_mat = np.ma.masked_where((R2_t < R2_U)|(R2_t < R2_J),R2_t)
   im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Reds)
-
   ax.set_xlabel('U')
   ax.set_ylabel('1/kT')
   ax.set_title('Model: Best of J (b), U(g), t (r)')
+
+  ax = axes[3,1]
+  mat = np.maximum(R2_J,R2_t)
+  mat = np.maximum(mat,R2_U)
+  cut = 0.6
+  plot_mat = np.ma.masked_where(mat>cut,mat)
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Purples)
+  
+  plot_mat = np.ma.masked_where(mat<cut,mat)
+  plot_mat/=plot_mat
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.RdGy)
+  
+  ax.set_xlabel('U')
+  ax.set_ylabel('1/kT')
+  ax.set_title('Model: None R2 > '+str(cut))
+
+
   ax.xaxis.tick_bottom()
   ax.set_yticks([0,4,8,12])
   ax.set_yticklabels([0,1,2,3])
