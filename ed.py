@@ -15,6 +15,7 @@ import statsmodels.api as sm
 from sklearn.metrics import r2_score
 import matplotlib.patches as patches
 from matplotlib.colors import LinearSegmentedColormap
+import scipy as sp 
 
 def hamiltonian(U):
   '''
@@ -84,7 +85,7 @@ def build_dm(e,ci,norb,nelec):
     dJ.append(val3)
   return pd.DataFrame({'energy':e,'dt':dt,'dU':dU,'dJ':dJ})
 
-def sub_sampling(e,ci,subset,N,norb,nelec,method='unif',beta=None,dt=None):
+def sub_sampling(e,ci,subset,N,norb,nelec,method='unif',beta=None,dt=None,nstep=None):
   #Generate samples 
   '''
   input:
@@ -99,6 +100,8 @@ def sub_sampling(e,ci,subset,N,norb,nelec,method='unif',beta=None,dt=None):
     return unif(e,ci,subset,N,norb,nelec)
   elif(method=='boltz'):
     return boltz(e,ci,subset,N,norb,nelec,beta,dt)
+  elif(method=='push'):
+    return push(e,ci,subset,N,norb,nelec,nstep,dt)
   else:
     return -1
 
@@ -164,6 +167,55 @@ def boltz(e,ci,subset,N,norb,nelec,beta,dt):
   print("Acceptance ratio: "+str(acc_ratio/N))
   return build_dm(sampled_e,sampled_ci,norb,nelec)
 
+def push_cost(dm):
+  t = dm['dt'].values #(N, 1)
+  U = dm['dU'].values #(N, 1)
+  v = np.concatenate((t[:,np.newaxis],U[:,np.newaxis]),axis=1)
+  
+  dist = sp.spatial.distance.cdist(v,v)
+  dist = -1./dist
+  ind = np.ones(dist.shape,dtype=bool)
+  np.fill_diagonal(ind,0)
+  
+  s = np.sum(dist[ind])
+  assert(s < 0)
+  
+  return s
+
+def push(e,ci,subset,N,norb,nelec,nstep,dt):
+  print("Push sampling: "+str(N))
+  basis = np.array(ci)[subset]
+  e_basis = np.array(e)[subset]
+  acc_rat = 0
+
+  #Initialize our walkers
+  curr = np.random.normal(size=(N,subset.shape[0]))
+  curr = preprocessing.normalize(curr, norm='l2')
+  curr_ci = np.einsum('ij,jkl->ikl',curr,basis)
+  curr_e = np.dot(curr**2,e_basis)
+  curr_dm = build_dm(curr_e,curr_ci,norb,nelec)
+
+  for i in range(nstep):
+    new = curr + dt*np.random.normal(size=(N,subset.shape[0]))  #Move proposal should prioritize certain directions
+    #since it isn't right now, we're getting a very strong bias towards not moving... 
+    new = preprocessing.normalize(new, norm='l2')
+    new_ci = np.einsum('ij,jkl->ikl',new,basis)
+    new_e = np.dot(new**2,e_basis)
+    new_dm = build_dm(new_e,new_ci,norb,nelec)
+
+    acc = np.exp(-(push_cost(new_dm) - push_cost(curr_dm))) > np.random.uniform(size=1)
+    if(acc):
+      acc_rat += 1
+      curr = new
+      curr = preprocessing.normalize(curr, norm='l2')
+      curr_ci = np.einsum('ij,jkl->ikl',curr,basis)
+      curr_e = np.dot(curr**2,e_basis)
+      curr_dm = build_dm(curr_e,curr_ci,norb,nelec)
+    else: pass
+
+  print("Acc ratio: "+str(acc_rat/nstep))
+  return curr_dm 
+
 if __name__=='__main__':
   #eig_vs_U.pdf
   '''
@@ -201,8 +253,9 @@ if __name__=='__main__':
   '''
 
   #eff_eig.pdf
+  '''
   Sz=0
-  betas = np.arange(0,3.25,0.25)
+  betas = np.linspace(0,0.4,13)
   Us = np.arange(13)
   R2_J = np.zeros((len(Us),len(betas)))
   R2_U = np.zeros((len(Us),len(betas)))
@@ -227,21 +280,21 @@ if __name__=='__main__':
       X=prop['dJ']
       X=sm.add_constant(X)
       w = np.exp(-beta*(y-min(y)))
-      ols=sm.WLS(y,X,weights=w).fit()
+      ols=sm.WLS(y,X,weights=w**2).fit()
       R2_J[Uz,z] = ols.rsquared
       v_J[Uz,z] = ols.params[1]
    
       X=prop['dt']
       X=sm.add_constant(X)
       w = np.exp(-beta*(y-min(y)))
-      ols=sm.WLS(y,X,weights=w).fit()
+      ols=sm.WLS(y,X,weights=w**2).fit()
       R2_t[Uz,z] = ols.rsquared
       v_t[Uz,z] = ols.params[1]
     
       X=prop['dU']
       X=sm.add_constant(X)
       w = np.exp(-beta*(y-min(y)))
-      ols=sm.WLS(y,X,weights=w).fit()
+      ols=sm.WLS(y,X,weights=w**2).fit()
       R2_U[Uz,z] = ols.rsquared
       v_U[Uz,z] = ols.params[1]
       z+=1
@@ -251,41 +304,31 @@ if __name__=='__main__':
   fig, axes = plt.subplots(nrows=4,ncols=2,sharey=True,sharex=True,figsize=(6,15))
   ax = axes[0,0]
   ax.matshow(R2_J.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: J')
+  ax.set_xlabel('U')
+  ax.set_ylabel('beta')
 
   ax = axes[0,1]
   v_J = np.ma.masked_where((R2_J < 0.4),v_J)
   ax.matshow(v_J.T,vmin=-0.25,vmax=0.25,cmap=plt.cm.RdGy)
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: J (-0.25,0.25)')
 
   ax = axes[1,0]
   ax.matshow(R2_U.T,vmax=1,vmin=0.5,cmap=plt.cm.Greens)
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: U')
 
   ax = axes[1,1]
   v_U = np.ma.masked_where((R2_U < 0.4),v_U)
   ax.matshow(v_U.T,vmin=-10,vmax=10,cmap=plt.cm.RdGy)
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: U (-10, 10)')
 
   ax = axes[2,0]
   ax.matshow(R2_t.T,vmax=1,vmin=0.5,cmap=plt.cm.Reds)
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: t')
 
   ax = axes[2,1]
   v_t = np.ma.masked_where((R2_t < 0.4),v_t)
   ax.matshow(-v_t.T,vmin=-1,vmax=1,cmap=plt.cm.RdGy)
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: t (1, -1)')
   
   ax = axes[3,0]
@@ -295,8 +338,6 @@ if __name__=='__main__':
   im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Greens)
   plot_mat = np.ma.masked_where((R2_t < R2_U)|(R2_t < R2_J),R2_t)
   im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Reds)
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: Best of J (b), U(g), t (r)')
 
   ax = axes[3,1]
@@ -310,15 +351,96 @@ if __name__=='__main__':
   plot_mat/=plot_mat
   im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.RdGy)
   
-  ax.set_xlabel('U')
-  ax.set_ylabel('1/kT')
   ax.set_title('Model: None R2 > '+str(cut))
 
 
   ax.xaxis.tick_bottom()
-  ax.set_yticks([0,4,8,12])
-  ax.set_yticklabels([0,1,2,3])
+  ax.set_yticks([0,3,6,9,12])
+  ax.set_yticklabels([0,0.1,0.2,0.3,0.4])
   
   plt.suptitle('WLS R2 and Param values on eigenstates')
   plt.savefig('eff_eig.pdf',bbox_inches='tight')
+  exit(0)
+  '''
+
+  #eff_eig_prelim.pdf
+  Sz=0
+  betas = np.linspace(0,0.4,13)
+  Us = np.arange(13)
+  R2_J = np.zeros((len(Us),len(betas)))
+  R2_U = np.zeros((len(Us),len(betas)))
+  R2_t = np.zeros((len(Us),len(betas)))
+  v_J = np.zeros((len(Us),len(betas)))
+  v_U = np.zeros((len(Us),len(betas)))
+  v_t = np.zeros((len(Us),len(betas)))
+  
+  Uz = 0
+  for U in Us:
+    norb = 4
+    nelec = (2 + Sz, 2 - Sz)
+    h1,eri = hamiltonian(U)
+    e,ci = fci.direct_uhf.kernel(h1,eri,norb=norb,nelec=nelec,nroots=10**5)
+    prop = build_dm(e,ci,norb=norb,nelec=nelec)
+
+    #J, strong coupling limit
+    y=prop['energy']
+    z=0
+    for beta in betas:
+      print(U,beta)
+      X=prop['dJ']
+      X=sm.add_constant(X)
+      w = np.exp(-beta*(y-min(y)))
+      ols=sm.WLS(y,X,weights=w**2).fit()
+      R2_J[Uz,z] = ols.rsquared
+      v_J[Uz,z] = ols.params[1]
+   
+      X=prop['dt']
+      X=sm.add_constant(X)
+      w = np.exp(-beta*(y-min(y)))
+      ols=sm.WLS(y,X,weights=w**2).fit()
+      R2_t[Uz,z] = ols.rsquared
+      v_t[Uz,z] = ols.params[1]
+    
+      X=prop['dU']
+      X=sm.add_constant(X)
+      w = np.exp(-beta*(y-min(y)))
+      ols=sm.WLS(y,X,weights=w**2).fit()
+      R2_U[Uz,z] = ols.rsquared
+      v_U[Uz,z] = ols.params[1]
+      z+=1
+    Uz+=1
+  
+  #Plot results
+  fig, axes = plt.subplots(nrows=2,ncols=2,sharey=True,sharex=True,figsize=(6,6))
+  ax = axes[0,0]
+  ax.matshow(R2_t.T,vmax=1,vmin=0.5,cmap=plt.cm.Reds)
+  ax.set_title('Effective t')
+  ax.set_ylabel(r'$\beta t$')
+
+  ax = axes[0,1]
+  ax.matshow(R2_U.T,vmax=1,vmin=0.5,cmap=plt.cm.Greens)
+  ax.set_title('Effective U')
+  
+  ax = axes[1,0]
+  ax.matshow(R2_J.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
+  ax.set_title('Effective J')
+  ax.set_ylabel(r'$\beta t$')
+  ax.set_xlabel(r'U/t')
+  ax.xaxis.tick_bottom()
+
+  ax = axes[1,1]
+  plot_mat = np.ma.masked_where((R2_U - R2_t > 0.05)|(R2_J - R2_t > 0.05),R2_t)
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Reds)
+  plot_mat = np.ma.masked_where((R2_t - R2_J > 0.05)|(R2_U - R2_J > 0.05),R2_J) #Add a buffer so things are a bit clearer
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Blues)
+  plot_mat = np.ma.masked_where((R2_t - R2_U > 0.05)|(R2_J - R2_U > 0.05),R2_U)
+  im = ax.imshow(plot_mat.T,vmax=1,vmin=0.5,cmap=plt.cm.Greens)
+  ax.set_title('Best effective model')
+  ax.set_xlabel(r'U/t')
+  ax.axvline(4.7,c='k',ls='--',lw=4)
+
+  ax.set_yticks([0,3,6,9,12])
+  ax.set_yticklabels([0,0.1,0.2,0.3,0.4])
+
+  plt.savefig('eff_eig_prelim.pdf',bbox_inches='tight')
   exit(0)
